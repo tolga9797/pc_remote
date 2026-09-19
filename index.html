@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC Uzaktan Kontrol</title>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.3/dist/mqtt.min.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --text: #1c1c1e;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --on: #16a34a;
+    --off: #dc2626;
+    --unknown: #9ca3af;
+    --accent: #2563eb;
+    --danger: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0b0d;
+      --card: #18181b;
+      --text: #f4f4f5;
+      --muted: #9ca3af;
+      --border: #2c2c30;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+  }
+  h1 {
+    font-size: 18px;
+    margin: 0 0 20px;
+    text-align: center;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--unknown);
+    transition: background 0.2s;
+  }
+  .dot.on { background: var(--on); }
+  .dot.off { background: var(--off); }
+  .status-text {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .conn-text {
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 24px;
+  }
+  button {
+    width: 100%;
+    border: none;
+    border-radius: 12px;
+    padding: 16px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 12px;
+    color: white;
+    transition: opacity 0.15s;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button:active:not(:disabled) { opacity: 0.8; }
+  #powerBtn { background: var(--accent); }
+  #resetBtn { background: var(--muted); }
+  #forceBtn { background: var(--danger); font-size: 13px; padding: 10px; }
+  .hint {
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>PC Uzaktan Kontrol</h1>
+    <div class="status-row">
+      <div class="dot" id="dot"></div>
+      <div class="status-text" id="statusText">Bilinmiyor</div>
+    </div>
+    <div class="conn-text" id="connText">Broker'a bağlanılıyor...</div>
+
+    <button id="powerBtn" disabled>Güç Butonuna Bas</button>
+    <button id="resetBtn" disabled>Reset</button>
+    <button id="forceBtn" disabled>Zorla Kapat (5sn basılı tut)</button>
+    <div class="hint">Her işlem öncesi onay istenir.</div>
+  </div>
+
+<script>
+  var MQTT_HOST = "63e6199de3ea4f52880f2d9c9eef6702.s1.eu.hivemq.cloud";
+  var MQTT_WSS_PORT = 8884;
+  var MQTT_USER = "pc-remote-web";
+  var MQTT_PASS = "Webpanel-7fXq2mLr!9";
+
+  var TOPIC_POWER_SET = "pcremote/power/set";
+  var TOPIC_RESET_SET = "pcremote/reset/set";
+  var TOPIC_STATUS = "pcremote/status";
+  var TOPIC_AVAILABILITY = "pcremote/availability";
+
+  var dot = document.getElementById("dot");
+  var statusText = document.getElementById("statusText");
+  var connText = document.getElementById("connText");
+  var powerBtn = document.getElementById("powerBtn");
+  var resetBtn = document.getElementById("resetBtn");
+  var forceBtn = document.getElementById("forceBtn");
+
+  var clientId = "web-" + Math.random().toString(16).slice(2, 10);
+  var client = mqtt.connect("wss://" + MQTT_HOST + ":" + MQTT_WSS_PORT + "/mqtt", {
+    clientId: clientId,
+    username: MQTT_USER,
+    password: MQTT_PASS,
+    reconnectPeriod: 3000
+  });
+
+  function setButtonsEnabled(enabled) {
+    powerBtn.disabled = !enabled;
+    resetBtn.disabled = !enabled;
+    forceBtn.disabled = !enabled;
+  }
+
+  client.on("connect", function () {
+    connText.textContent = "Bağlı";
+    client.subscribe(TOPIC_STATUS);
+    client.subscribe(TOPIC_AVAILABILITY);
+  });
+
+  client.on("reconnect", function () {
+    connText.textContent = "Yeniden bağlanılıyor...";
+    setButtonsEnabled(false);
+  });
+
+  client.on("close", function () {
+    connText.textContent = "Bağlantı yok";
+    setButtonsEnabled(false);
+  });
+
+  client.on("error", function (err) {
+    connText.textContent = "Hata: " + err.message;
+    setButtonsEnabled(false);
+  });
+
+  client.on("message", function (topic, payload) {
+    var msg = payload.toString();
+    if (topic === TOPIC_STATUS) {
+      if (msg === "ON") {
+        dot.className = "dot on";
+        statusText.textContent = "PC Açık";
+      } else if (msg === "OFF") {
+        dot.className = "dot off";
+        statusText.textContent = "PC Kapalı";
+      } else {
+        dot.className = "dot";
+        statusText.textContent = "Bilinmiyor";
+      }
+    } else if (topic === TOPIC_AVAILABILITY) {
+      setButtonsEnabled(msg === "online");
+      if (msg !== "online") {
+        connText.textContent = "Cihaz çevrimdışı";
+      }
+    }
+  });
+
+  powerBtn.addEventListener("click", function () {
+    if (confirm("Güç butonuna kısa basış gönderilsin mi?")) {
+      client.publish(TOPIC_POWER_SET, "SHORT");
+    }
+  });
+
+  resetBtn.addEventListener("click", function () {
+    if (confirm("Reset butonuna basılsın mı?")) {
+      client.publish(TOPIC_RESET_SET, "SHORT");
+    }
+  });
+
+  forceBtn.addEventListener("click", function () {
+    if (confirm("Güç butonuna 5 saniye basılı tutulsun mu? (Zorla kapatma)")) {
+      client.publish(TOPIC_POWER_SET, "LONG");
+    }
+  });
+</script>
+</body>
+</html>
