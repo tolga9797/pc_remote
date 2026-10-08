@@ -140,7 +140,7 @@
       <div class="dot" id="dot"></div>
       <div class="status-text" id="statusText">Bilinmiyor</div>
     </div>
-    <div class="conn-text" id="connText">Bağlı</div>
+    <div class="conn-text" id="connText">Cihaz durumu bekleniyor...</div>
 
     <button id="powerBtn" disabled>Güç Butonuna Bas</button>
     <button id="resetBtn" disabled>Reset</button>
@@ -245,7 +245,10 @@
         safeStorageSet("pcremote_token", appToken);
         lockCard.hidden = true;
         panelCard.hidden = false;
-        setPanelButtonsEnabled(deviceOnline);
+        // OK cevabını ESP verdi; demek ki cihaz online
+        deviceOnline = true;
+        connText.textContent = "Bağlı";
+        setPanelButtonsEnabled(true);
       } else {
         lockError.textContent = "Kullanıcı adı veya şifre yanlış.";
         safeStorageRemove("pcremote_username");
