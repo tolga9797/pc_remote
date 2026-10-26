@@ -180,6 +180,16 @@
   var appToken = null;
   var deviceOnline = false;
 
+  // Giriş cevabını ESP veriyor; belirli sürede cevap gelmezse kullanıcıyı uyar
+  var AUTH_TIMEOUT_MS = 5000;
+  var awaitingAuth = false;
+  var authTimer = null;
+
+  function lockStatusText() {
+    if (!client.connected) return lockConnText.textContent;
+    return deviceOnline ? "Bağlı, şifreni gir." : "Bağlı, ama cihaz çevrimdışı görünüyor.";
+  }
+
   function safeStorageGet(key) {
     try { return localStorage.getItem(key); } catch (e) { return null; }
   }
@@ -206,7 +216,7 @@
 
   client.on("connect", function () {
     lockConnText.textContent = "Bağlı, şifreni gir.";
-    unlockBtn.disabled = false;
+    unlockBtn.disabled = awaitingAuth;
     client.subscribe(TOPIC_AUTH_RESPONSE);
     client.subscribe(TOPIC_STATUS);
     client.subscribe(TOPIC_AVAILABILITY);
@@ -240,7 +250,15 @@
     var msg = payload.toString();
 
     if (topic === TOPIC_AUTH_RESPONSE) {
+      // Başka bir kullanıcının giriş denemesine verilen cevabı yok say
+      if (!awaitingAuth) return;
+      awaitingAuth = false;
+      clearTimeout(authTimer);
+      authTimer = null;
+      unlockBtn.disabled = !client.connected;
+      unlockBtn.textContent = "Giriş Yap";
       if (msg === "OK") {
+        lockError.textContent = "";
         safeStorageSet("pcremote_username", appUsername);
         safeStorageSet("pcremote_token", appToken);
         lockCard.hidden = true;
@@ -276,6 +294,9 @@
         setPanelButtonsEnabled(deviceOnline);
       }
       connText.textContent = deviceOnline ? "Bağlı" : "Cihaz çevrimdışı";
+      if (!lockCard.hidden) {
+        lockConnText.textContent = lockStatusText();
+      }
     }
   });
 
@@ -283,10 +304,23 @@
     var user = usernameInput.value.trim();
     var pass = tokenInput.value.trim();
     if (!user || !pass) return;
+    if (awaitingAuth || !client.connected) return;
     appUsername = user;
     appToken = pass;
     lockError.textContent = "";
+    awaitingAuth = true;
+    unlockBtn.disabled = true;
+    unlockBtn.textContent = "Cihaz bekleniyor...";
     client.publish(TOPIC_AUTH_REQUEST, appUsername + "|" + appToken);
+
+    clearTimeout(authTimer);
+    authTimer = setTimeout(function () {
+      authTimer = null;
+      awaitingAuth = false;
+      unlockBtn.disabled = !client.connected;
+      unlockBtn.textContent = "Tekrar Dene";
+      lockError.textContent = "Cihaz yanıt vermiyor. ESP kapalı ya da internete bağlı değil olabilir (elektrik/modem kesintisi).";
+    }, AUTH_TIMEOUT_MS);
   }
 
   unlockBtn.addEventListener("click", tryUnlock);
